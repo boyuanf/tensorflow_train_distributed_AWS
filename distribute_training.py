@@ -13,8 +13,8 @@ MOVING_AVERAGE_DECAY = 0.99
 LEARNING_RATE_DECAY_FACTOR = 0.96  # Learning rate decay factor.
 INITIAL_LEARNING_RATE = 0.01       # Initial learning rate.
 
-MODEL_SAVE_PATH = "C:\\Boyuan\\MyPython\\DistributedModelSave"
-DATA_PATH = "C:\\Boyuan\\MyPython\\MNIST_Dataset"
+MODEL_SAVE_PATH = "/home/ubuntu/Boyuan/DistributedModelSave"
+DATA_PATH = "/home/ubuntu/Boyuan/MNIST_Dataset"
 
 
 
@@ -186,7 +186,7 @@ def main(argv=None):
                                      log_device_placement=False)
 
         now = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-        check_point_dir = "{}\\run-{}-checkpoint".format(MODEL_SAVE_PATH, now)
+        check_point_dir = "{}/run-{}-checkpoint".format(MODEL_SAVE_PATH, now)
 
         # 训练过程和异步一致。
         # tf.train.MonitoredTrainingSession will automatically continue the training from checkpoint if interrupted.
