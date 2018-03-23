@@ -1,0 +1,7 @@
+On single server cmd:
+
+CUDA_VISIBLE_DEVICES='' python distribute_training.py --job_name=ps --task_id=0 --ps_hosts=localhost:2221 --worker_hosts=localhost:2222,localhost:2223
+
+python distribute_training.py --job_name=worker --task_id=0 --ps_hosts=localhost:2221 --worker_hosts=localhost:2222,localhost:2223
+
+python distribute_training.py --job_name=worker --task_id=1 --ps_hosts=localhost:2221 --worker_hosts=localhost:2222,localhost:2223
