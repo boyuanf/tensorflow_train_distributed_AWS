@@ -1,21 +1,17 @@
 from datetime import datetime
 import os.path
-import re
 import time
 import tensorflow as tf
-from tensorflow.examples.tutorials.mnist import input_data
 
 
 # 配置神经网络的参数。
 BATCH_SIZE = 128
-TRAINING_STEPS = 2000
+TRAINING_STEPS = 2000   # in case of training by batch, then it is 2000 batch to train
 MOVING_AVERAGE_DECAY = 0.99
 LEARNING_RATE_DECAY_FACTOR = 0.96  # Learning rate decay factor.
 INITIAL_LEARNING_RATE = 0.01       # Initial learning rate.
 
 MODEL_SAVE_PATH = "/home/ubuntu/Boyuan/DistributedModelSave"
-DATA_PATH = "/home/ubuntu/Boyuan/MNIST_Dataset"
-
 
 
 # 和异步模式类似的设置flags。
@@ -29,7 +25,51 @@ tf.app.flags.DEFINE_string(
     'worker_hosts', 'localhost:2222,localhost:2223',
     'Comma-separated list of hostname:port for the worker jobs. e.g. "tf-worker0:2222,tf-worker1:2223" ')
 tf.app.flags.DEFINE_integer('task_id', 0, 'Task ID of the worker/replica running the training.')
+tf.app.flags.DEFINE_boolean(
+    "sync_replicas", False,
+    "Use the sync_replicas (synchronized replicas) mode, "
+    "wherein the parameter updates from workers are aggregated "
+    "before applied to avoid stale gradients")
+tf.app.flags.DEFINE_string('train_dir', '/home/ubuntu/Boyuan/MNIST_Dataset',
+                           """Directory where to read data, write event logs """
+                           """and checkpoint.""")
+tf.app.flags.DEFINE_integer('read_thread_num', 4,
+                            """Number of the threads reading the input file.""")
 
+#set the num_epochs to None, will cycle through the strings in string_tensor an unlimited number of times
+def get_input(filename, batch_size, read_thread_num):
+    filename = os.path.join(FLAGS.train_dir, filename + '.tfrecords')
+    print('Reading', filename)
+    with tf.name_scope('inputs'):
+        filename_queue = tf.train.string_input_producer(
+            [filename], num_epochs=None)
+        reader = tf.TFRecordReader()
+        _, serialized_example = reader.read(filename_queue)  # tf.TFRecordReader().read() only accept queue as param
+        features = tf.parse_single_example(
+            serialized_example,
+            # Defaults are not specified since both keys are required.
+            features={
+                'height': tf.FixedLenFeature([], tf.int64),
+                'width': tf.FixedLenFeature([], tf.int64),
+                'label': tf.FixedLenFeature([], tf.int64),
+                'image_raw': tf.FixedLenFeature([], tf.string),
+            })
+        image = tf.decode_raw(features['image_raw'], tf.uint8)
+        #height = tf.cast(features['height'], tf.int32)
+        #width = tf.cast(features['width'], tf.int32)
+        label = tf.cast(features['label'], tf.int32)
+        image.set_shape([28 * 28])
+        image = tf.cast(image, tf.float32) * (1. / 255) - 0.5
+
+        # Shuffle the examples and collect them into batch_size batches. (Internally uses a RandomShuffleQueue)
+        # We run this in two threads to avoid being a bottleneck.
+        images_batch, labels_batch = tf.train.shuffle_batch(
+            [image, label], batch_size=batch_size, num_threads=read_thread_num,
+            capacity=1000 + 10 * batch_size,
+            # Ensures a minimum amount of shuffling of examples.
+            min_after_dequeue=1000)
+
+        return images_batch, labels_batch
 
 def forward_propagation(X, layer_hidden_nums, training, dropout_rate=0.01, regularizer_scale=0.01):
     """
@@ -106,7 +146,7 @@ def tower_loss(images, labels):
 
 # 和异步模式类似的定义TensorFlow的计算图。唯一的区别在于使用
 # tf.train.SyncReplicasOptimizer函数处理同步更新。
-def train(images, labels, n_workers, is_chief):
+def train(n_workers, is_chief):
 
     global_step = tf.train.get_or_create_global_step()
     #print("global_step in train(): ", global_step)
@@ -116,7 +156,14 @@ def train(images, labels, n_workers, is_chief):
     # decay_steps = int(num_batches_per_epoch * NUM_EPOCHS_PER_DECAY) # learning rate decay every NUM_EPOCHS_PER_DECAY epoch
     decay_steps = int(num_batches_per_epoch)  # learning rate decay every epoch
 
-    loss, correct = tower_loss(images, labels)
+
+    with tf.device('/cpu:0'):  # Leave read thread to CPU, have to set, otherwise the read progress no work as expected
+        # Get images and labels for MNIST.
+        images_batch, labels_batch = get_input('mnist_train', BATCH_SIZE, FLAGS.read_thread_num)
+
+    '''images_batch, labels_batch = get_input('mnist_train', BATCH_SIZE, FLAGS.read_thread_num)'''
+
+    loss, correct = tower_loss(images_batch, labels_batch)
     accuracy = tf.reduce_mean(tf.cast(correct, tf.float32), name='accuracy')
 
     # only chief worker will save the graph, so add the task_id is not useless
@@ -134,12 +181,16 @@ def train(images, labels, n_workers, is_chief):
                                                LEARNING_RATE_DECAY_FACTOR,
                                                staircase=True)  # use stair learning rate decay or gradually decay
 
-    # 通过tf.train.SyncReplicasOptimizer函数实现同步更新。
-    opt = tf.train.SyncReplicasOptimizer(
-        tf.train.GradientDescentOptimizer(learning_rate),
-        replicas_to_aggregate=n_workers,
-        total_num_replicas=n_workers)
-    sync_replicas_hook = opt.make_session_run_hook(is_chief)
+    if FLAGS.sync_replicas:
+        # 通过tf.train.SyncReplicasOptimizer函数实现同步更新。
+        opt = tf.train.SyncReplicasOptimizer(
+                tf.train.GradientDescentOptimizer(learning_rate),
+                replicas_to_aggregate=n_workers,
+                total_num_replicas=n_workers)
+        sync_replicas_hook = opt.make_session_run_hook(is_chief)
+    else:
+        opt = tf.train.GradientDescentOptimizer(learning_rate)
+
     train_op = opt.minimize(loss, global_step=global_step)
     '''
     if is_chief:
@@ -150,7 +201,10 @@ def train(images, labels, n_workers, is_chief):
         with tf.control_dependencies([variables_averages_op, train_op]):
             train_op = tf.no_op()
     '''
-    return global_step, loss, accuracy, train_op, sync_replicas_hook
+    if FLAGS.sync_replicas:
+        return global_step, loss, accuracy, train_op, sync_replicas_hook
+    else:
+        return global_step, loss, accuracy, train_op
 
 
 def main(argv=None):
@@ -169,34 +223,47 @@ def main(argv=None):
             server.join()
 
     is_chief = (FLAGS.task_id == 0)
-    mnist = input_data.read_data_sets(DATA_PATH)
 
     device_setter = tf.train.replica_device_setter(
         worker_device="/job:worker/task:%d" % FLAGS.task_id,
         cluster=cluster)
 
     with tf.device(device_setter):
-        x = tf.placeholder(tf.float32, [None, 784], name='x-input')
-        y_ = tf.placeholder(tf.int64, [None, ], name='y-input')
-        global_step, loss, accuracy, train_op, sync_replicas_hook = train(x, y_, n_workers, is_chief)
+        if FLAGS.sync_replicas:
+            global_step, loss, accuracy, train_op, sync_replicas_hook = train(n_workers, is_chief)
+            # 把处理同步更新的hook也加进来。
+            hooks = [sync_replicas_hook, tf.train.StopAtStepHook(last_step=TRAINING_STEPS)]
+        else:
+            global_step, loss, accuracy, train_op = train(n_workers, is_chief)
+            hooks = [tf.train.StopAtStepHook(last_step=TRAINING_STEPS)]
 
-        # 把处理同步更新的hook也加进来。
-        hooks = [sync_replicas_hook, tf.train.StopAtStepHook(last_step=TRAINING_STEPS)]
         sess_config = tf.ConfigProto(allow_soft_placement=True,
                                      log_device_placement=False)
 
         now = datetime.utcnow().strftime("%Y%m%d%H%M%S")
         check_point_dir = "{}/run-{}-checkpoint".format(MODEL_SAVE_PATH, now)
 
+        # No need to init local variables, because the default scaffold in tf.train.MonitoredTrainingSession will init
+        # both local and global var if scaffold is none
+        #scaffold = tf.train.Scaffold(local_init_op=tf.group(tf.local_variables_initializer()))
         # 训练过程和异步一致。
         # tf.train.MonitoredTrainingSession will automatically continue the training from checkpoint if interrupted.
         with tf.train.MonitoredTrainingSession(master=server.target,
                                                is_chief=is_chief,
                                                checkpoint_dir=check_point_dir,
                                                hooks=hooks,
+                                               #scaffold=scaffold,
                                                save_checkpoint_secs=60, # set to None then only save events file
                                                #save_checkpoint_secs=None,  # set to None then only save events file
                                                config=sess_config) as mon_sess:
+
+            # Build an initialization operation to run below.
+            #init_op = tf.group(tf.local_variables_initializer())
+            #mon_sess.run(init_op)
+
+            coord = tf.train.Coordinator()
+            threads = tf.train.start_queue_runners(sess=mon_sess, coord=coord)
+
             print("session started")
             step = 0
             start_time = time.time()
@@ -205,9 +272,8 @@ def main(argv=None):
             # runs all the time to execute the training model, will stop based on the return of the global step
             # and the training model will return global step based on its status
             while not mon_sess.should_stop():
-                xs, ys = mnist.train.next_batch(BATCH_SIZE)
                 _, loss_value, accuracy_value, global_step_value = mon_sess.run(
-                    [train_op, loss, accuracy, global_step], feed_dict={x: xs, y_: ys})
+                    [train_op, loss, accuracy, global_step])
                 #print("local_step: ", step)
                 #print("global_step: ", global_step_value)
                 if step > 0 and step % 100 == 0:
@@ -220,6 +286,9 @@ def main(argv=None):
                 step += 1
 
             print("total step: %d, global_step: %d" % (step, global_step_value))
+
+            coord.request_stop()
+            coord.join(threads)
 
 
 if __name__ == "__main__":
