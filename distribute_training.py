@@ -6,7 +6,7 @@ import tensorflow as tf
 
 # 配置神经网络的参数。
 BATCH_SIZE = 128
-TRAINING_STEPS = 2000   # in case of training by batch, then it is 2000 batch to train
+TRAINING_STEPS = 4000   # in case of training by batch, then it is 2000 batch to train
 MOVING_AVERAGE_DECAY = 0.99
 LEARNING_RATE_DECAY_FACTOR = 0.96  # Learning rate decay factor.
 INITIAL_LEARNING_RATE = 0.01       # Initial learning rate.

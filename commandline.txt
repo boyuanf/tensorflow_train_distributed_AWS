@@ -9,8 +9,8 @@ python distribute_training.py --job_name=worker --task_id=1 --ps_hosts=localhost
 
 Multiple server:
 
-CUDA_VISIBLE_DEVICES='' python distribute_training.py --job_name=ps --task_id=0 --ps_hosts=ec2-13-229-242-227.ap-southeast-1.compute.amazonaws.com:2221 --worker_hosts=ec2-13-229-242-227.ap-southeast-1.compute.amazonaws.com:2222,ec2-13-250-49-173.ap-southeast-1.compute.amazonaws.com:2223
+CUDA_VISIBLE_DEVICES='' python distribute_training.py --job_name=ps --task_id=0 --ps_hosts=ec2-54-169-168-26.ap-southeast-1.compute.amazonaws.com:2221 --worker_hosts=ec2-54-169-168-26.ap-southeast-1.compute.amazonaws.com:2222,ec2-52-77-218-2.ap-southeast-1.compute.amazonaws.com:2223
 
-python distribute_training.py --job_name=worker --task_id=0 --ps_hosts=ec2-13-229-242-227.ap-southeast-1.compute.amazonaws.com:2221 --worker_hosts=ec2-13-229-242-227.ap-southeast-1.compute.amazonaws.com:2222,ec2-13-250-49-173.ap-southeast-1.compute.amazonaws.com:2223
+python distribute_training.py --job_name=worker --task_id=0 --ps_hosts=ec2-54-169-168-26.ap-southeast-1.compute.amazonaws.com:2221 --worker_hosts=ec2-54-169-168-26.ap-southeast-1.compute.amazonaws.com:2222,ec2-52-77-218-2.ap-southeast-1.compute.amazonaws.com:2223
 
-python distribute_training.py --job_name=worker --task_id=1 --ps_hosts=ec2-13-229-242-227.ap-southeast-1.compute.amazonaws.com:2221 --worker_hosts=ec2-13-229-242-227.ap-southeast-1.compute.amazonaws.com:2222,ec2-13-250-49-173.ap-southeast-1.compute.amazonaws.com:2223
+python distribute_training.py --job_name=worker --task_id=1 --ps_hosts=ec2-54-169-168-26.ap-southeast-1.compute.amazonaws.com:2221 --worker_hosts=ec2-54-169-168-26.ap-southeast-1.compute.amazonaws.com:2222,ec2-52-77-218-2.ap-southeast-1.compute.amazonaws.com:2223
